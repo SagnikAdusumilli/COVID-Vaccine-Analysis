@@ -1,6 +1,6 @@
 ---
 title: "Investigation of the relationship between vaccines and fatal COVID cases"
-author: "Sagnik Adusumilli - 1003157567"
+author: "Sagnik Adusumilli"
 header-includes:
   - \usepackage{booktabs}
   - \usepackage{float}
