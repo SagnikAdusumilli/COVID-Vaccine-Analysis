@@ -1,0 +1,385 @@
+---
+title: "Investigation of the relationship between vaccines and fatal COVID cases"
+author: "Sagnik Adusumilli - 1003157567"
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{float}
+output:
+  pdf_document: pdf_document
+---
+
+```{r, include=FALSE}
+library(opendatatoronto) #[9] Toronto open data package
+library(tidyverse)
+library(knitr)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+# Introduction
+The COVID-19 pandemic has been around for almost over a year now, and over 3,500 people have died in Toronto so far[1]. Trusted sources like the Center for Disease Control (CDC) and World Health Organization (WHO)[2][3] all claim that getting vaccinated is an effective measure for protecting oneself and ending the pandemic. However there are many there are still some instances of vaccine hesitancy that remain[4]. WHO defines vaccines hesitancy as: "delay in acceptance or refusal of vaccines despite the availability of vaccines"[5].
+  
+  **In this paper, using regression analysis, I will investigate if the vaccine was effective in decreasing the number of fatalities caused by COVID and also examine how it might effect the number of fatal COVID cases for different genders and different age groups**. I think the following results might be observed:
+  
+* Given the wide support of vaccines from trusted sources, we might observe that the odds of fatal cases decrease with time after the introduction of vaccines.
+* There might be more fatalities observed in the older age bands since older people tend to have a weaker immunity[15]. Perhaps the difference in number of fatalities in each age group might decrease after vaccinations have been introduced.
+* I think that the vaccine would have similar levels of effectiveness on each gender. I did not come across any article that claimed the contrary.
+
+# Data
+
+## Data Collection Process
+
+The dataset can be found on the Toronto Open data portal[6]. The Data was extracted from the provincial Case & Contact Management System (CCM)[7]. These are the cases that were reported to Toronto Public Health[8]. This dataset is refreshed every week and new additional cases are reported. This ensures that the analysis is not done on outdated data. However, this also means that certain fields could be added or removed over time. This makes the the data source a little unstable. However the attributes that are being investigated (Gender, age and time) will most likely be constant. Furthermore, this also implies that that the findings of this report may not be accurate as more data is entered. However, the results can be updated accordingly by following the same methodology. 
+
+\newpage 
+## Data Summary
+The dataset records over 180,000 cases that were reported to Toronto Public health since January 2020. Each row in the table is a case that that was reported and there are 18 columns that record different information pertaining to the case. For our investigative purposes, we will only consider the following attributes. 
+
+* Reported Date: The date on which the case was reported to Toronto Public Health.
+
+* Outcome: This is a categorical variable that indicates the outcome of the case.
+  - FATAL: Cases with a fatal outcome
+  - RESOLVED: Non-fatal cases where either the person recovered or reported date is more than 14 days from symptom onset and the person is not currently hospitalized
+  - ACTIVE: All cases that are not in the above two categories
+  
+* Age Group: Age at the time of the illness. This is also a categorical variable that divides the age into the following bands by years: $\leq$ 19, 20-29, 30-39, 40-49, 50-59, 60-69, 70-79, 80-89, 90+, unknown (This is reported as blank)
+
+* Client Gender: The gender reported by the person themselves
+
+### Data Cleaning
+```{r, include = FALSE}
+
+# Getting the data This might give internal server error in which case use read.csv to load the data instead
+# covid_package_id <- search_packages("covid-19 Cases in Toronto")$id
+# covid_data_id <- list_package_resources(covid_package_id)$id
+# covid_data <- get_resource(covid_data_id) # gives 180316 observations of 18 variables
+
+#NOTE: DO NOT OPEN the csv file in excel because it will curropt the data
+covid_data <- read.csv('./clean_data.csv', check.names = FALSE)
+
+
+```
+
+```{r, include = FALSE}
+
+#Removing missing values 
+covid_data_clean <- na.omit(covid_data) #175235
+
+#constructing the dataset
+dataset <- covid_data_clean %>% 
+  select(`Reported Date`, `Client Gender`, `Age Group`, Outcome) %>%
+  rename(Date = `Reported Date`, Gender = `Client Gender`, Age_group = `Age Group`, Fatal = Outcome) %>%
+  mutate(Gender = if_else((Gender == 'UNKNOWN' | 
+                             Gender == 'NOT LISTED, PLEASE SPECIFY' |
+                             Gender == 'PREFER NOT TO SAY'), 'UNKNOWN', Gender)) %>%
+  mutate(Fatal = if_else(Fatal == 'FATAL', 1, 0))
+
+# creating days variable 
+initial_date = as.Date(min(dataset$Date))
+dataset <- dataset %>% 
+  mutate(Day = as.integer(as.Date(Date, format = "%Y-%m-%d") - initial_date))
+
+# Cerated period column
+vax_date <- '2020-12-14'
+dataset <- dataset %>% mutate(Period = if_else(as.Date(Date) < as.Date(vax_date), 'Pre vaccine', 'Post vaccine'))
+
+```
+
+* First all rows with missing values were removed. After removing the missing values, the dataset contained over 175,000 rows. This was a large sample size hence there was no need to estimate the missing values. 
+
+* Then the variables were renamed for convenience and simplicity 
+  - 'Reported' Date was renamed to be 'Date'
+  - 'Client Gender' was renamed to be 'Gender'
+  
+* For the purpose of this study, the only outcome of interest is to know if a COVID case is fatal or not. Hence all non-fatal outcomes were recorded to be 0 and all fatal outcomes were coded as 1. This transformed the variable to a binary variable that will be used as the response variable for the regression model. The variable was renamed to 'Fatal' to denote its new meaning. 
+  
+* Initially the Gender variable contained several genders, however 'PREFER NOT TO SAY', 'NON LISTED, 'PLEASE SPECIFY', 'UNKNOWN' means the same thing semantically. Hence these values were all grouped under 'UNKNOWN'.
+
+* Created a new categorical variable named 'Period' to indicate if a case occurred after vaccinations were made available to the public or before. This was done by comparing each reported date of a case to '2020-12-14'[10], which is the date that vaccinations were introduced.
+
+* Lastly, a new variable was created to represent the progression of time. The 'Date' variable contains individual dates which does not directly indicate how much time has passed and also cannot be used as input directly for regression analysis. Hence a new numerical variable 'Day' was created. For each row (This represents a single COVID case) the the 'Day' value is the number of days that have passed since the first COVID case was recorded by Toronto Public Health. This first day is set to 0. 
+
+\newpage
+### Numerical Summaries
+```{r, echo=FALSE}
+gender_counts <- dataset %>% count(Gender)
+# 17 function used to create tables
+kable(gender_counts, col.names = c('Reported Gender', 'Count'),  caption = 'Demographic breakdown by Gender')
+```
+From this table we can see that for most of the cases we don't know the gender of the person. Therefore gender may not be a significant variable to analyze. 
+
+```{r, echo=F}
+age_counts <- dataset %>% count(Age_group)
+kable(age_counts,  col.names = c('Age Group', 'Count'), caption = 'Demographic breakdown by Age Group')
+```
+Looking at this table, it seems that most of the COVID cases reported are from people who fall in the age band 20 to 39 years. This maybe because people of this age band mostly work full time and therefore may have more difficulty in avoiding social contact.
+
+```{r, include=FALSE}
+# number of days: 
+days_num <- length(unique(dataset$Day))
+# number of cases
+nrow(dataset)
+
+daily_cases_count <- dataset %>% group_by(Date) %>% count()
+min_cases <- min(daily_cases_count$n)
+max_cases <- max(daily_cases_count$n)
+min_dates <- daily_cases_count$Date[daily_cases_count$n == min_cases]
+max_dates <- daily_cases_count$Date[daily_cases_count$n == max_cases]
+```
+
+For the following numerical summaries it should be noted that we are only considering COVID case reports with no missing values.
+The first COVID case was recorded on `r min(dataset$Date)` and the last recorded date of a COVID case was `r max(dataset$Date)` which means `r max(dataset$Day)` days have passed since the first COVID case was recorded. During that time, the minimum number of cases recorded on a day is `r min_cases` which were recorded on the following days `r min_dates`
+
+The most number of cases recorded in a day is `r max_cases`  which occurred on `r max_dates`. The total average number of cases in Toronto for the dataset is  `r nrow(dataset)/days_num` per day
+
+\newpage
+## Data plots
+```{r, echo = FALSE}
+# Use this to create some plots. 
+# draw plots related to the hypothesis
+
+# 1) box plot to compare the fatal cases before and after vaccines were introduced
+# n will have to be the number of fatal cases. This is the y axis
+# the x axis the factor, pre-vax or post post vax
+
+fatal_aggr <- dataset %>% group_by(Day) %>% 
+  filter(Fatal == 1) %>% 
+  mutate(Period = if_else(as.Date(Date) < as.Date('2020-12-14'), 'Pre vaccine', 'Post vaccine')) %>%
+  mutate(Count = n())
+
+
+cases_box <- ggplot(data = fatal_aggr, aes(x = as.factor(Period), y = Count)) +
+  geom_boxplot() +
+  labs(title = 'Comparing the daily fatal cases before and after vaccines',
+       caption = 'Figure 1',
+       y = 'Number of fatal cases per day', 
+       x = 'Phase')
+# 3) scatter plot with a trend-line to see the overall tend of number of fatal cases with time 
+cases_box
+```
+
+The box-plot labeled 'Post vaccine' represents the fatal cases after vaccination was made available to Ontarians. The other box-plot represents the number of fatal cases before vaccinations. If we compare the IQR range and the max values of each box-plot, we can see that the 'Post vaccine' box-plot has smaller values. This indicates that there were fewer number of daily fatal cases on average after vaccinations were made accessible and furthermore the smaller size also suggests that there was less variability in the number of cases as well.
+
+```{r, echo=FALSE}
+# 2) try a bar graph instead with 2 colors, pre and post
+ ggplot(fatal_aggr, aes(Age_group, fill=Period))+
+  geom_bar(position = 'dodge')+
+  coord_flip()+
+  labs(title = 'Total number of fatalities before and after vaccination period',
+       subtitle = "by Age group",
+       caption = 'Figure 2',
+       y = 'Number of fatal cases', 
+       x = 'Age group')
+```
+Each bar in the bar graph represents the total number of fatal cases per age group. The red bars are fatal cases that happened before the vaccine was introduced. The teal bars represent the number of fatal cases that happened after the vaccines was introduced. 
+
+Going by bar lengths for each age group, it would seem that the number of fatalities increase for older age groups. We can also see that the number of fatal cases for people who are 80 and older were much higher before the vaccine was introduced. However, it seems that for all other age groups, more fatalities occurred after the vaccine was introduced. 
+
+This does seem to contradict the conclusion drawn from the previous graph. However, there can be several factors that could explain this. Firstly we must take into account that the vaccines were not made available to all the age groups at once. Older people and other people classified as "at-risk" were given access to the vaccines first [11]. Even after the vaccinations were introduce, there were several new variations that had higher infection rates [12]. These factors could explain why fatal cases recorded for the younger groups may have been higher in this period. It should also be noted that the number of days before vaccine is less than the number of days after vaccine. So the latter period had more time to accumulate fatal cases.
+  
+
+```{r, echo=FALSE}
+# what the average number of fatal cases for each group in each period 
+age_aggr <- aggregate(Fatal ~ Period + Age_group, data=dataset, mean)
+
+ggplot(age_aggr, aes(x = as.factor(Age_group), y = Fatal, fill = Period)) +
+    geom_bar(stat = "identity", position = "dodge")+
+    coord_flip()+
+labs(title = 'Average number of fatalities before and after vaccination period',
+       subtitle = "by Age group",
+       caption = 'Figure 3',
+       y = 'Average number of fatal cases', 
+       x = 'Age group')
+```
+This graph compares the average number of fatal cases before and after vaccination was introduced for each age group. We can see that average number of fatal cases decreased for every age group above 50. The other age groups had a very small average from the start so the vaccination did not effect those ratios. We could also conclude that the vaccination did not increase the likelihood of fatal cases, as the previous graph would imply for some age groups. 
+
+
+```{r, echo=FALSE}
+# plot scatter plot for each age group
+vax_day <- dataset$Day[dataset$Date == vax_date][1]
+ggplot(data = fatal_aggr, aes(x = Day, y = Count, color = Age_group))+
+  geom_point()+
+  scale_color_brewer(palette="Paired")+ #[18] setting color pallets for groups 
+  geom_smooth(method=lm, se = FALSE)+ #[16] adding regression line to scatter plot
+  geom_vline(xintercept = vax_day)+
+  geom_text(aes(x=vax_day, label="V-Day", y=45), colour="black", angle=90, vjust = 1.2)+
+  labs(title = 'Scatter plot of fatal cases for each age group',
+       caption = 'Figure 4',
+       y = 'Fatal caises', 
+       x = 'Days since the first COVID case report')
+```
+This graph adds time as a factor to show how the number of fatal cases changed for each age group over time. Regression lines were fitted to show the trend for each age group. "V-day" marks the day vaccination was made accessible to the public. From this we can see that the Vaccines were introduced during the 2nd wave of COVID, so the number of the fatalities would still be expected to rise. It should also be noted that the amplitude of the subsequent waves after "V-day" are significantly lower than the amplitude of the wave before it. Secondly, we can also see that the trend line for all age groups have a decreasing slope with respect to the number of days. This means that the average number of fatal cases decreased for every age group. This supports the hypothesis that the vaccines help decrease the odds of fatalities for all age groups.
+
+
+Note: I am not doing any graphical summaries on gender because as shown in the numerical summaries section, for most of the cases, the gender was unknown. So I do not think that there will be any useful insights we could gain. 
+
+All analysis for this report was programmed using `R version 4.1.1`.
+
+\newpage
+# Methods
+Before continuing with the investigation, I will explain the model which will be used for the analysis in this section.
+The model that will be used is a binary classifier called logistic regression. It works as follows. Suppose we want to predict binary outcome variable Y based on the predictors $X_1, X_2, \ldots, X_k$. Here we assume that Y follows a Bernoulli distribution where $P(Y)$ is the probability of outcome Y occurring. Then Logistic regression allows us to express Y as a function of $X_1$ and $X_2$ as the following formula: 
+
+$$
+log\left( \frac{P(Y)}{1-P(Y)} \right) = \beta_0 + \beta_1X_1 + \beta_2X_2 + \ldots + \beta_kX_k + \epsilon
+$$
+
+The term $log\left( \frac{P(Y)}{1-P(Y)} \right)$ is known as the log-odds $P(Y)$ is the probability of outcome Y occurring. $\beta_0$ represents the default value of the log-odds. The coefficient $B_i$ for $i \in \{ 1, 2, \ldots k\}$represent the change in log odds for one unit change in $X_i$ assuming that all other predictor values being constant. 
+$\epsilon$ is a random variable that has a standard normal distribution. This term represents the error term in our prediction.
+
+
+$$
+log\left( \frac{P(\hat{Y})}{1-P(\hat{Y})} \right) = \hat{\beta_0} + \hat{\beta_1}X_1 + \hat{\beta_2}X_2 + \ldots + \hat{\beta_k}X_k
+$$
+To get a prediction from this model we can do the following process: 
+Let $\eta = \hat{\beta_0} + \hat{\beta_1}X_1 + \hat{\beta_2}X_2 + \ldots + \hat{\beta_k}X_k$.
+Now we have that $log\left( \frac{P(\hat{Y})}{1-P(\hat{Y})} \right) = \eta$.
+Therefore we get that $P(\hat{Y}) = \frac{e^{\eta}}{1+ e^\eta}$.
+we now can get an estimated probability of outcome Y from predictors. Now we can set a threshold $\gamma$ where if $P(\hat{Y}) \ge \gamma$ we predict 1 and 0 otherwise. Usually the $\gamma$ is set to 0.5 which means 50% probability
+
+For each estimated coefficient we also compute the P-value. This P-value of coefficient $\beta_i$ is the probability that we got an estimate $\hat{\beta_i}$ under the assumption that the true parameter value $\beta_i$ is 0. If the probability of getting the value $\hat{\beta_i}$ under this assumption is less or equal to significance level $\alpha$ (usually 0.05 in most cases), we reject the assumption (This is the null hypothesis) and conclude that $\beta_i \neq 0$. We can also use the P-value to compute the confidence interval (CI) of each estimate. The 95% CI [a, b] implies that if we were to run the gradient descent algorithm several times, then 95% of the time the estimate $\hat\beta_i$ will be in between a and b.
+
+Now, I will explain how I will use this model in my investigation. First I will construct a logistic model using the full dataset and check the significance level for each predictor. If the P-values are low, then it would imply that these predictors are statistically significant for predicting the Fatality of a COVID case. I will disregard predictors with high P-values. My hypothesis however, is that "Age_group" and "Day" are significant predictors since the graphs showed that these variables have relationship with the fatality of the cases.
+
+Now to study the effect of the vaccines on the significant variables, I will construct two models on different datasets. The first model will be constructed with the dataset containing only COVID cases that happened before vaccination was made available to the public. The second model will be constructed with the dataset containing on the cases that happened after that day. Then I will compare the coefficients and the P-value for each predictor in the two models. A big difference in the coefficients of a predictor or a large change in P-value would imply that the introduction of vaccine has effected the relationship of the variables and the outcome, which is the Response variable 'FATAL' in our case.
+
+\newpage
+# Results
+
+For the initial model, the following variables was used:
+
+* FATAL: this is the response variable. It is a binary categorical variable where the value 1 denotes that a case was fatal and 0 denotes a non-fatal case
+
+* Age_Group: This is a categorical predictor variable where each age band is a category 
+
+* Gender: This is a categorical predictor variable where each gender is a category
+
+* Day: This a numerical predictor variable where the day value is the number of days that passed since the first COVID case was recorded by Toronto Public Health 
+
+```{r, include = FALSE}
+logit.full <- glm(Fatal ~ Day + as.factor(Gender) + as.factor(Age_group), data = dataset, family = 'binomial')
+sum_info.full <- summary(logit.full)
+```
+
+```{r, echo = FALSE}
+# create a table with coefficient and P-value 
+# explain how one hot encoding works
+# tell that gender was not statistically significant at all like we expected. there is a 95% chance that coefficient is 0
+coef_info <- data.frame(sum_info.full$coefficients)
+kable(select(coef_info, Estimate, "Pr...z.."), col.names = c('Coefficient estimate', 'P-value'), caption = 'full model output')
+```
+For regression, all variables must be converted to numerical values. Hence there were additional predictors to represent categories in categorical variables. For example suppose an input has the gender "TRANS MAN". In that case, all other gender related variables will be set to 0 and the variable "TRANS MAN" will be set to 1 to indicate the gender. However, it should be noted that there is one variable missing for each category. For example, for gender the variable to represent "MAN/BOY" is missing. This is because the model treats this as the reference category. This means that if all gender related variables is set to 0, the default assumption of the gender is "MAN/BOY". I will explain how to interpret the coefficient estimates in later models. This model is only used to filter the variables based on P-values. We see that for all gender related variables, they have very high P-values. This means that under the null hypothesis (the real coefficient value is 0), there is a high probability that we can derive this estimate. This implies that these factors are not useful in predicting the fatality of a case and hence should be left out of the model. In other words, it would seem that all genders are similar odds of getting a fatal COVID case. This was an expected result since Table 1 shows that the most of the cases had unknown gender. 
+
+\newpage
+After removing gender from the list of predictors, I constructed two models on different datasets to examine how the relationships changed between the variables after vaccination was introduced. The first dataset contained COVID cases after vaccination was introduced to the public and the second dataset contained COVID cases after this date
+```{r, include= FALSE}
+pre_data <- dataset %>% filter(as.Date(Date) < as.Date(vax_date))
+post_data <- dataset %>% filter(as.Date(Date) >= as.Date(vax_date))
+
+pre.model <- glm(Fatal ~ Day + as.factor(Age_group), data = pre_data, family = 'binomial')
+post.model <- glm(Fatal ~ Day + as.factor(Age_group), data = post_data, family = 'binomial')
+
+pre_coef <- data.frame(summary(pre.model)$coefficients) %>% select(Estimate, "Pr...z..")
+post_coef <- data.frame(summary(post.model)$coefficients) %>% select(Estimate, "Pr...z..")
+
+```
+
+```{r, echo=FALSE}
+kable(pre_coef, col.names = c('Coefficient estimate', 'P-value'), caption = c("Model ouput on dataset before vaccinations"))
+```
+This is the model output for model constructed on the dataset containing cases before vaccination were introduced. Even though some age predictors have high P-value there other age predictors that have low P-value and therefore the predictor Age_group is significant as a whole. The P-value of Day variable is also very low hence it is also a statistically significant predictor. Note that none of the P-values are actually 0, but the `kable()` function in R reports very low value as approximately 0.
+
+Now I will discuss the interpretation of the coefficient estimates. First consider the estimate of the Day predictor. This value means that for every one unit increase in day changes the log-odds by -0.0040544. This also means that the odds of getting a fatal covid case for every one unit increase in Day decreases by $(e^{0.0040544}) =$ `r exp(0.0040544)`[14]. This is under the assumption that all other predictor values remains constant.
+
+For the categorical variable, notice that the age group "19 years and younger" is not listed. This means that this is the reference category. Every coefficient of the other age category is relative to this category. For example the coefficient 7.7424646 for the "70 to 79 Years" means that the log-odds of a fatal COVID case for this age group is 7.7424646 more than the log-odds of fatal COVID case for "19 and younger age band". This also means that odds of a fatal case for the age group "70 to 79 years" is $(e^{7.7424646}) =$ `r exp(7.7424646)`[14] times the age group "19 years and younger". This is under the assumption that all other predictor value remains constant.
+
+\newpage
+```{r, echo=FALSE}
+kable(post_coef, col.names = c('Coefficient estimate', 'P-value'), caption = c("Model ouput on dataset after vaccinations"))
+```
+This is the the output of the model constructed on the dataset after vaccinations were made available. The coefficient estimates are much higher for the age group predictors. However, the high P-value indicates that the null hypotheses is most likely true. In other words, the true coefficient values are most likely 0. This means that there is no significant difference between the odds of getting a fatal covid case for each age group.
+
+What is interesting to note is that the P-value for the day variable is also slightly high. This implies that there is less certainty if the number of fatalities decrease as the days pass. If we look at Figure 4, we can see that the number of fatalities since day 500 are very few in number. Hence there is not much room for the number of fatalities to decrease further. In this context the high P-value and low estimate value makes sense. 
+
+```{r, echo=FALSE}
+
+# Use this to calculate generate a scatterplot of your variables if desired.
+# You can use abline to overlay the scatterplot with the regression line (again, if desired).
+```
+
+All analysis for this report was programmed using `R version 4.1.1`. I used the `glm()` function in base `R` to derive the estimates of a frquentist logistic regression in this section.
+
+
+\newpage
+
+# Conclusions
+
+The aim for this paper was to investigate how effectively vaccines were able to reduce the risk of someone contracting a fatal case of COVID. We examined its effect on demographic groups based on gender and age. We also investigated if the vaccines also caused the fatal cases to do down with time. 
+
+Following are the main results from the investigation
+
+* The model constructed on data before vaccines were present showed that the odds of getting a fatal COVID case increased progressively as the age groups got older. 
+
+* From figure 3, we saw that the mean number of fatal cases were close to 0 for younger age groups. From this we can infer that these age groups must have low odds of getting a fatal COVID case. We also know the model constructed on data after vaccines were made available suggested that the new odds of getting COVID was similar for each age group. From these two results we could infer that the older age groups would also have low odds of getting a fatal COVID.
+
+* The regression analysis did not show any significant insights between time and the number of fatal COVID cases. However, in figure 4 which shows the number of fatal COVID cases vs days, we saw that for the COVID waves after the vaccines were introduced has a smaller amplitude than the wave before it. This perhaps suggest that the vaccines were able to suppress the number of fatalities that could have occurred.
+
+Overall, The analysis done in this reports supports the hypothesis that vaccines help prevent fatal COVID cases especially among older people.
+
+## Weaknesses
+
+* The first major weakness is that we did not have access to vaccination data. In other words we did not know how many of the fatal cases that occurred included fully vaccinated people. If Toronto Public Health also reported if a person was vaccinated, we could have more direct evidence to show a link between vaccines and fatality.
+
+* For most of the fatalities the gender was marked as 'UNKNOWN', hence we could not gain any meaningful insights into the relationship between Gender and fatality
+
+* It should also be noted that a case marked as active could later be fatal if the person dies later. Our analysis did not take this into account and simply marked active cases as non fatal. 
+
+* Lastly as was mentioned before, due to the constant updates of the dataset, the results of this analysis may not be as accurate in the future since the data might reveal that the relationships between the variables have changed.
+
+## Next Steps
+* In the future if we could know what vaccine a patient was given and what variant of COVID infection they had, we could investigate how effective each vaccine is against different COVID strains. 
+
+* Due to the constricted time, I did not have time to research the other variables present in the dataset. Perhaps there could a be regression model built to predict the number of cases for each day. This model could use more variables present in the dataset to predict this.
+
+* The regression analysis done on the data was from a frequentist's perspective, which assumes no prior distribution of the outcome variable. Perhaps if a domain expert in the virology could be consulted, they could provide help select a reasonable distribution of the predictor and the outcome to help us construct a bayesian model. This perhaps could give stronger and more accurate results.
+
+
+\newpage
+
+# Bibliography
+
+1. City of Toronto, “Covid-19: Case counts,” City of Toronto, 23-Sep-2021. [Online]. Available: https://www.toronto.ca/home/covid-19/covid-19-pandemic-data/covid-19-weekday-status-of-cases-data/. [Accessed: 26-Oct-2021]. 
+
+2. “Vaccines for covid-19,” Centers for Disease Control and Prevention. [Online]. Available: https://www.cdc.gov/coronavirus/2019-ncov/vaccines/index.html. [Accessed: 26-Oct-2021].
+
+3. “Covid-19 vaccines,” World Health Organization. [Online]. Available: https://www.who.int/emergencies/diseases/novel-coronavirus-2019/covid-19-vaccines. [Accessed: 26-Oct-2021]. 
+
+4. S. Machingaidze and C. S. Wiysonge, “Understanding covid-19 vaccine hesitancy,” Nature News, 16-Jul-2021. [Online]. Available: https://www.nature.com/articles/s41591-021-01459-7. [Accessed: 26-Oct-2021]. 
+
+5.“Vaccine hesitancy: What it means and what we need to know ...” [Online]. Available: https://www.who.int/immunization/research/forums_and_initiatives/1_RButler_VH_Threat_Child_Health_gvirf16.pdf?ua=1. [Accessed: 26-Oct-2021]. 
+
+6. “Open data dataset,” City of Toronto Open Data Portal. [Online]. Available: https://open.toronto.ca/dataset/covid-19-cases-in-toronto/. [Accessed: 26-Oct-2021]. 
+
+7. Government of Ontario, Ministry of Health and Long-Term Care, “Mers-COV (novel coronavirus) - ministry programs - health care professionals - MOHLTC,” Coronavirus - Ministry Programs - Health Care Professionals - MOHLTC. [Online]. Available: https://www.health.gov.on.ca/en/pro/programs/publichealth/coronavirus/. [Accessed: 26-Oct-2021]. 
+
+8. City of Toronto, “Toronto Public Health,” City of Toronto, 21-Feb-2019. [Online]. Available: https://www.toronto.ca/city-government/accountability-operations-customer-service/city-administration/staff-directory-divisions-and-customer-service/toronto-public-health/. [Accessed: 26-Oct-2021]. 
+
+9. “Opendatatoronto,” README. [Online]. Available: https://cran.r-project.org/web/packages/opendatatoronto/readme/README.html. [Accessed: 26-Oct-2021]. 
+
+10. R. Aiello and J. Forani, “'V-day': First covid-19 vaccines administered in Canada,” Coronavirus, 14-Dec-2020. [Online]. Available: https://www.ctvnews.ca/health/coronavirus/v-day-first-covid-19-vaccines-administered-in-canada-1.5230184. [Accessed: 26-Oct-2021]. 
+
+11. “Ontario's COVID-19 vaccination plan,” COVID. [Online]. Available: https://covid-19.ontario.ca/ontarios-covid-19-vaccination-plan. [Accessed: 26-Oct-2021]. 
+
+12. “SARS-COV-2 variant classifications and definitions,” Centers for Disease Control and Prevention. [Online]. Available: https://www.cdc.gov/coronavirus/2019-ncov/variants/variant-info.html. [Accessed: 26-Oct-2021]. 
+
+13. “Logistic Regression,” Speech and Language Processing. [Online]. Available: https://web.stanford.edu/~jurafsky/slp3/5.pdf. [Accessed: 26-Oct-2021].  
+
+14.“5.7 logistic regression: Interpreting model ... - youtube.com,” Youtube. [Online]. Available: https://www.youtube.com/watch?v=tfJUbCGELCQ. [Accessed: 26-Oct-2021]. 
+
+15. V. Bajaj, N. Gadi, A. P. Spihlman, S. C. Wu, C. H. Choi, and V. R. Moulton, “Aging, immunity, and covid-19: How age influences the host immune response to coronavirus infections?,” Frontiers, 01-Jan-1AD. [Online]. Available: https://www.frontiersin.org/articles/10.3389/fphys.2020.571416/full. [Accessed: 26-Oct-2021]. l
+
+16. “GGPLOT2 scatter plots : QUICK START GUIDE - R software and Data Visualization,” STHDA. [Online]. Available: http://sthda.com/english/wiki/ggplot2-scatter-plots-quick-start-guide-r-software-and-data-visualization. [Accessed: 26-Oct-2021]. 
+
+17. C. D. Yihui Xie, “R markdown cookbook,” 10.1 The function knitr::kable(), 07-Oct-2021. [Online]. Available: https://bookdown.org/yihui/rmarkdown-cookbook/kable.html. [Accessed: 26-Oct-2021]. 
+
+18. Y. Holtz, “R Color Brewer's palettes,” – the R Graph Gallery. [Online]. Available: https://www.r-graph-gallery.com/38-rcolorbrewers-palettes.html. [Accessed: 26-Oct-2021]. 
+
+

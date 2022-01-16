@@ -1,0 +1,19 @@
+1) Toronto Open data package: https://cran.r-project.org/web/packages/opendatatoronto/readme/README.html
+2) List of all dyplr fucntions used https://rdrr.io/cran/dplyr/man/
+3) date of first vaccine coming to canada https://www.ctvnews.ca/health/coronavirus/v-day-first-covid-19-vaccines-administered-in-canada-1.5230184
+4) appending lists in R https://stackoverflow.com/questions/50673966/how-to-append-to-a-list-from-multiple-list-in-r
+5) group_by function https://dplyr.tidyverse.org/reference/count.html
+6) number of covid cases https://www.toronto.ca/home/covid-19/covid-19-pandemic-data/covid-19-weekday-status-of-cases-data/
+7) CDC https://www.cdc.gov/coronavirus/2019-ncov/vaccines/index.html
+8) WHO https://www.who.int/emergencies/diseases/novel-coronavirus-2019/covid-19-vaccines
+9) vaccine hesitancy https://www.nature.com/articles/s41591-021-01459-7
+10) WHO hesitancy defintion https://www.who.int/immunization/research/forums_and_initiatives/1_RButler_VH_Threat_Child_Health_gvirf16.pdf
+11) data src https://open.toronto.ca/dataset/covid-19-cases-in-toronto/
+12) CCM ontario https://www.health.gov.on.ca/en/pro/programs/publichealth/coronavirus/docs/contact_mngmt/management_cases_contacts.pdf
+13) Toronto public health https://www.toronto.ca/city-government/accountability-operations-customer-service/city-administration/staff-directory-divisions-and-customer-service/toronto-public-health/
+14) creating tables in R https://bookdown.org/yihui/rmarkdown-cookbook/kable.html
+15) adding regression lines to scatter plots http://www.sthda.com/english/wiki/ggplot2-scatter-plots-quick-start-guide-r-software-and-data-visualization#add-regression-lines
+16) adding lablels to vline https://stackoverflow.com/questions/18091721/align-geom-text-to-a-geom-vline-in-ggplot2
+17) gradient descent for logistic regression https://web.stanford.edu/~jurafsky/slp3/5.pdf
+18) Interpreting coefficients for logistic regression https://www.youtube.com/watch?v=tfJUbCGELCQ
+19) aggregate function https://r-coder.com/aggregate-r/
